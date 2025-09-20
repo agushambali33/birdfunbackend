@@ -1,96 +1,55 @@
-// sign.js
-const { ethers } = require('ethers');
+// sign.js (Vercel Serverless Function)
+import { ethers } from "ethers";
 
-module.exports = async (req, res) => {
-  console.log('Request URL:', req.url);
-  console.log('Request Method:', req.method);
+export default async function handler(req, res) {
+  try {
+    // Ambil parameter dari query
+    const { player, points, nonce, contractAddress } = req.query;
 
-  if (req.method === 'GET') {
-    try {
-      const urlObj = new URL(req.url, `http://${req.headers.host}`);
-      const {
-        player,
-        points = '100',
-        nonce = '0',
-        expiry = (Math.floor(Date.now() / 1000) + 86400).toString(),
-        contractAddress = '0x3b807e75c5b3719b76d3ae0e4b3c9f02984f2f41'
-      } = Object.fromEntries(urlObj.searchParams);
-
-      const pointsNum = Number(points);
-      const nonceNum = Number(nonce);
-      const expiryNum = Number(expiry);
-
-      // RATE: 1 point = 1 Hbird
-      const amountTokens = (pointsNum * 1).toString(); // string like '100' for 100 Hbird
-      const tokenAmount = ethers.utils.parseUnits(amountTokens, 18); // in wei
-
-      if (!player || !ethers.utils.isAddress(player)) {
-        res.writeHead(400, { 'Content-Type': 'application/json' });
-        return res.end(JSON.stringify({ error: 'Invalid player address' }));
-      }
-      if (!ethers.utils.isAddress(contractAddress)) {
-        res.writeHead(400, { 'Content-Type': 'application/json' });
-        return res.end(JSON.stringify({ error: 'Invalid contract address' }));
-      }
-      if (isNaN(pointsNum) || pointsNum < 0) {
-        res.writeHead(400, { 'Content-Type': 'application/json' });
-        return res.end(JSON.stringify({ error: 'Invalid points' }));
-      }
-      if (isNaN(nonceNum) || nonceNum < 0) {
-        res.writeHead(400, { 'Content-Type': 'application/json' });
-        return res.end(JSON.stringify({ error: 'Invalid nonce' }));
-      }
-      if (isNaN(expiryNum) || expiryNum < Date.now() / 1000) {
-        res.writeHead(400, { 'Content-Type': 'application/json' });
-        return res.end(JSON.stringify({ error: 'Invalid expiry' }));
-      }
-
-      // signer key from env or fallback (dev only)
-      let signerPrivateKey = process.env.SIGNER_PRIVATE_KEY;
-      if (!signerPrivateKey) {
-        // development fallback key (don't use on mainnet, rotate & store securely)
-        signerPrivateKey = '0xdb308d012d8f24ae617092ac27477d509574441d3bfe3b53a1870233b98c7ef0';
-      }
-      const wallet = new ethers.Wallet(signerPrivateKey);
-
-      // Build payload exactly as contract expects:
-      // keccak256(abi.encodePacked(player, points, tokenAmount, nonce, expiry, address(this)))
-      const payloadHash = ethers.utils.keccak256(
-        ethers.utils.solidityPack(
-          ['address', 'uint256', 'uint256', 'uint256', 'uint256', 'address'],
-          [player, pointsNum, tokenAmount, nonceNum, expiryNum, contractAddress]
-        )
-      );
-
-      // Sign the raw payloadHash bytes. Wallet.signMessage(arrayify(payloadHash))
-      // creates the "\x19Ethereum Signed Message:\n32" prefix internally,
-      // which matches the contract's toEthSignedMessageHash.
-      const signature = await wallet.signMessage(ethers.utils.arrayify(payloadHash));
-      const recovered = ethers.utils.verifyMessage(ethers.utils.arrayify(payloadHash), signature);
-
-      const out = {
-        player,
-        points: pointsNum.toString(),
-        amountTokens: amountTokens,                  // human readable token amount (Hbird)
-        amountWei: tokenAmount.toString(),           // amount in wei (BigNumber -> string)
-        nonce: nonceNum.toString(),
-        expiry: expiryNum.toString(),
-        contractAddress,
-        signerAddress: wallet.address,
-        signature,
-        recoveredSigner: recovered,
-        success: recovered.toLowerCase() === wallet.address.toLowerCase()
-      };
-
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      return res.end(JSON.stringify(out));
-    } catch (err) {
-      console.error('sign handler error:', err);
-      res.writeHead(500, { 'Content-Type': 'application/json' });
-      return res.end(JSON.stringify({ error: 'Internal server error', details: err?.message }));
+    if (!player || !points || !nonce || !contractAddress) {
+      return res.status(400).json({ success: false, error: "Missing parameters" });
     }
-  } else {
-    res.writeHead(404, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ error: 'Not Found' }));
+
+    // Pakai private key test (JANGAN pakai di production!)
+    const PRIVATE_KEY = "0xdb308d012d8f24ae617092ac27477d509574441d3bfe3b53a1870233b98c7ef0";
+    const wallet = new ethers.Wallet(PRIVATE_KEY);
+
+    // Expiry 24 jam ke depan
+    const expiry = Math.floor(Date.now() / 1000) + 60 * 60 * 24;
+
+    // Convert points ke token 1:1 dengan 18 desimal
+    const amountWei = ethers.utils.parseUnits(points.toString(), 18);
+
+    // Buat message hash
+    const messageHash = ethers.utils.solidityKeccak256(
+      ["address", "uint256", "uint256", "uint256", "uint256", "address"],
+      [player, points, amountWei, nonce, expiry, contractAddress]
+    );
+
+    // Arrayify sebelum sign
+    const arrayHash = ethers.utils.arrayify(messageHash);
+
+    // Sign message
+    const signature = await wallet.signMessage(arrayHash);
+
+    // Cek siapa signer hasil recover
+    const recoveredSigner = ethers.utils.verifyMessage(arrayHash, signature);
+
+    return res.status(200).json({
+      player,
+      points,
+      amountTokens: points,
+      amountWei: amountWei.toString(),
+      nonce,
+      expiry,
+      contractAddress,
+      signerAddress: wallet.address,
+      signature,
+      recoveredSigner,
+      success: recoveredSigner.toLowerCase() === wallet.address.toLowerCase(),
+    });
+  } catch (err) {
+    console.error("sign.js error", err);
+    return res.status(500).json({ success: false, error: err.message });
   }
-};
+}
