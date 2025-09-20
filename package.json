@@ -1,0 +1,8 @@
+{
+  "name": "flappy-backend",
+  "version": "1.0.0",
+  "main": "api/sign.js",
+  "dependencies": {
+    "ethers": "^5.7.2"
+  }
+}
