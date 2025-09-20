@@ -1,55 +1,66 @@
-// sign.js (Vercel Serverless Function)
 import { ethers } from "ethers";
 
-export default async function handler(req, res) {
-  try {
-    // Ambil parameter dari query
-    const { player, points, nonce, contractAddress } = req.query;
+// 🔑 PK test wallet (punya kamu, hanya untuk dev/test)
+const PRIVATE_KEY = "0xdb308d012d8f24ae617092ac27477d509574441d3bfe3b53a1870233b98c7ef0";
+const SIGNER = new ethers.Wallet(PRIVATE_KEY);
 
-    if (!player || !points || !nonce || !contractAddress) {
-      return res.status(400).json({ success: false, error: "Missing parameters" });
+// ✨ CORS middleware
+function setCorsHeaders(res) {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+}
+
+export default async function handler(req, res) {
+  setCorsHeaders(res);
+
+  if (req.method === "OPTIONS") {
+    return res.status(200).end(); // ✅ preflight CORS
+  }
+
+  try {
+    const { player, points, nonce = "0", contractAddress } = req.query;
+
+    if (!player || !points || !contractAddress) {
+      return res.status(400).json({ error: "Missing parameters" });
     }
 
-    // Pakai private key test (JANGAN pakai di production!)
-    const PRIVATE_KEY = "0xdb308d012d8f24ae617092ac27477d509574441d3bfe3b53a1870233b98c7ef0";
-    const wallet = new ethers.Wallet(PRIVATE_KEY);
+    // 💰 Convert points -> token
+    const amountTokens = points.toString();
+    const amountWei = ethers.utils.parseUnits(amountTokens, 18).toString();
 
-    // Expiry 24 jam ke depan
-    const expiry = Math.floor(Date.now() / 1000) + 60 * 60 * 24;
+    // Expiry = 30 menit dari sekarang
+    const expiry = Math.floor(Date.now() / 1000) + 1800;
 
-    // Convert points ke token 1:1 dengan 18 desimal
-    const amountWei = ethers.utils.parseUnits(points.toString(), 18);
-
-    // Buat message hash
+    // Buat hash voucher
     const messageHash = ethers.utils.solidityKeccak256(
-      ["address", "uint256", "uint256", "uint256", "uint256", "address"],
-      [player, points, amountWei, nonce, expiry, contractAddress]
+      ["address", "uint256", "uint256", "uint256", "address"],
+      [player, amountWei, nonce, expiry, contractAddress]
     );
 
-    // Arrayify sebelum sign
-    const arrayHash = ethers.utils.arrayify(messageHash);
+    const messageHashBinary = ethers.utils.arrayify(messageHash);
 
-    // Sign message
-    const signature = await wallet.signMessage(arrayHash);
+    // ✍️ Tanda tangan voucher
+    const signature = await SIGNER.signMessage(messageHashBinary);
 
-    // Cek siapa signer hasil recover
-    const recoveredSigner = ethers.utils.verifyMessage(arrayHash, signature);
+    // Recovered signer (debug)
+    const recoveredSigner = ethers.utils.verifyMessage(messageHashBinary, signature);
 
     return res.status(200).json({
       player,
       points,
-      amountTokens: points,
-      amountWei: amountWei.toString(),
+      amountTokens,
+      amountWei,
       nonce,
       expiry,
       contractAddress,
-      signerAddress: wallet.address,
+      signerAddress: SIGNER.address,
       signature,
       recoveredSigner,
-      success: recoveredSigner.toLowerCase() === wallet.address.toLowerCase(),
+      success: recoveredSigner.toLowerCase() === SIGNER.address.toLowerCase(),
     });
   } catch (err) {
-    console.error("sign.js error", err);
-    return res.status(500).json({ success: false, error: err.message });
+    console.error("Error signing voucher:", err);
+    return res.status(500).json({ error: "Internal server error", details: err.message });
   }
 }
