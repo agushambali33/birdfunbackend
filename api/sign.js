@@ -1,7 +1,11 @@
 const { ethers } = require('ethers');
 
 module.exports = async (req, res) => {
-  if (req.method === 'GET' && req.url.startsWith('/api/sign')) {
+  // Debug: Log req.url and req.method
+  console.log('Request URL:', req.url);
+  console.log('Request Method:', req.method);
+
+  if (req.method === 'GET') {
     const urlObj = new URL(req.url, `http://${req.headers.host}`);
     const {
       player,
