@@ -1,7 +1,6 @@
 const { ethers } = require('ethers');
 
 module.exports = async (req, res) => {
-  // Debug: Log req.url and req.method
   console.log('Request URL:', req.url);
   console.log('Request Method:', req.method);
 
@@ -10,11 +9,15 @@ module.exports = async (req, res) => {
     const {
       player,
       points = 100,
-      amountTokens = '1000000000000000000',
       nonce = '0',
       expiry = Math.floor(Date.now() / 1000) + 86400,
       contractAddress = '0x3b807e75c5b3719b76d3ae0e4b3c9f02984f2f41'
     } = Object.fromEntries(urlObj.searchParams);
+
+    const pointsNum = Number(points);
+    const nonceNum = Number(nonce);
+    const expiryNum = Number(expiry);
+    const amountTokens = (pointsNum * 0.1).toString(); // Rate 1 point = 0.1 Hbird
 
     if (!player || !ethers.utils.isAddress(player)) {
       res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -24,9 +27,6 @@ module.exports = async (req, res) => {
       res.writeHead(400, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify({ error: 'Invalid contract address' }));
     }
-    const pointsNum = Number(points);
-    const nonceNum = Number(nonce);
-    const expiryNum = Number(expiry);
     if (isNaN(pointsNum) || pointsNum < 0) {
       res.writeHead(400, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify({ error: 'Invalid points' }));
@@ -39,7 +39,7 @@ module.exports = async (req, res) => {
       res.writeHead(400, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify({ error: 'Invalid expiry' }));
     }
-    const tokenAmount = ethers.utils.parseUnits(amountTokens.toString(), 18);
+    const tokenAmount = ethers.utils.parseUnits(amountTokens, 18);
 
     let signerPrivateKey = process.env.SIGNER_PRIVATE_KEY;
     if (!signerPrivateKey) {
@@ -48,7 +48,7 @@ module.exports = async (req, res) => {
     const wallet = new ethers.Wallet(signerPrivateKey);
 
     const payloadHash = ethers.utils.keccak256(
-      ethers.utils.defaultAbiCoder.encode(
+      ethers.utils.solidityPack(
         ['address', 'uint256', 'uint256', 'uint256', 'uint256', 'address'],
         [player, pointsNum, tokenAmount, nonceNum, expiryNum, contractAddress]
       )
@@ -64,7 +64,7 @@ module.exports = async (req, res) => {
     const out = {
       player,
       points: pointsNum.toString(),
-      amountTokens: ethers.utils.formatUnits(tokenAmount, 18),
+      amountTokens: amountTokens,
       amountWei: tokenAmount.toString(),
       nonce: nonceNum.toString(),
       expiry: expiryNum.toString(),
