@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Voucher Claim Test</title>
+  <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; padding: 20px; }
+    button { padding: 10px 15px; margin: 5px; cursor: pointer; }
+    #status { margin-top: 15px; }
+    pre { background: #f4f4f4; padding: 10px; border-radius: 5px; }
+  </style>
+</head>
+<body>
+  <h2>🎁 Voucher Claim DApp</h2>
+  <button onclick="connectWallet()">🦊 Connect Wallet</button>
+  <button onclick="checkPool()">💰 Check Pool Balance</button>
+  <button onclick="claimVoucher()">🎟 Claim Voucher</button>
+
+  <div id="status">Not connected</div>
+  <pre id="log"></pre>
+
+  <script>
+    const CONTRACT_ADDRESS = "0x3b807E75c5b3719B76d3ae0e4B3c9f02984f2F41";
+    const ABI = [
+      "function redeemVoucher(address player,uint256 points,uint256 tokenAmount,uint256 nonce,uint256 expiry,bytes signature) external",
+      "function getPoolBalance() external view returns (uint256)"
+    ];
+
+    let provider, signer, contract, player;
+
+    function log(msg) {
+      const logBox = document.getElementById("log");
+      logBox.textContent += msg + "\n";
+      logBox.scrollTop = logBox.scrollHeight;
+    }
+
+    async function connectWallet() {
+      try {
+        provider = new ethers.providers.Web3Provider(window.ethereum);
+        await provider.send("eth_requestAccounts", []);
+        signer = provider.getSigner();
+        player = await signer.getAddress();
+        contract = new ethers.Contract(CONTRACT_ADDRESS, ABI, signer);
+        document.getElementById("status").innerText = "✅ Wallet connected: " + player;
+        log("Wallet connected: " + player);
+      } catch (err) {
+        log("Connect error: " + err.message);
+      }
+    }
+
+    async function checkPool() {
+      try {
+        const bal = await contract.getPoolBalance();
+        log("Pool balance: " + ethers.utils.formatUnits(bal, 18) + " Hbird");
+      } catch (err) {
+        log("Pool check error: " + err.message);
+      }
+    }
+
+    async function claimVoucher() {
+      try {
+        if (!player) throw new Error("Wallet not connected");
+
+        const nonce = Math.floor(Date.now() / 1000); // bisa diganti nonce counter backend
+        const points = 100;
+
+        // 1. Fetch voucher dari backend (Vercel serverless)
+        const url = `/api/sign?player=${player}&points=${points}&nonce=${nonce}&contractAddress=${CONTRACT_ADDRESS}`;
+        log("Fetching voucher: " + url);
+
+        const res = await fetch(url);
+        const voucher = await res.json();
+        log("Voucher: " + JSON.stringify(voucher, null, 2));
+
+        if (!voucher.signature) throw new Error("Voucher tidak valid / tidak ada signature");
+
+        // 2. Panggil redeemVoucher ke kontrak
+        const tx = await contract.redeemVoucher(
+          voucher.player,
+          voucher.points,
+          voucher.tokenAmount,
+          voucher.nonce,
+          voucher.expiry,
+          voucher.signature
+        );
+
+        log("Tx sent: " + tx.hash);
+        await tx.wait();
+        log("✅ Voucher claimed sukses!");
+      } catch (err) {
+        log("❌ Claim failed: " + err.message);
+      }
+    }
+  </script>
+</body>
+</html>
