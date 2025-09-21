@@ -2,102 +2,80 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>HBIRD Claim</title>
+  <title>Wallet Connect Test</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!-- Ethers v5 -->
   <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.min.js"></script>
+  <!-- Ethers v6 -->
+  <script src="https://cdn.jsdelivr.net/npm/ethers@6.13.2/dist/ethers.min.js"></script>
   <style>
-    body { font-family: Arial, sans-serif; background: #f5f5f5; margin: 0; padding: 0;
-           display: flex; justify-content: center; align-items: center; height: 100vh; }
-    .box { width: 90%; max-width: 400px; background: white; padding: 20px; border-radius: 10px;
-           box-shadow: 0 2px 6px rgba(0,0,0,0.1); text-align: center; }
-    button { width: 100%; padding: 14px; margin: 10px 0; border: none; border-radius: 8px;
-             font-size: 16px; font-weight: bold; cursor: pointer; }
-    #connectBtn { background: #ff6600; color: white; }
-    #claimBtn { background: #4caf50; color: white; }
-    input { width: 100%; padding: 12px; margin-top: 10px; border: 1px solid #ccc; border-radius: 8px; }
-    p { font-size: 14px; margin-top: 8px; word-break: break-word; }
+    body { font-family: Arial, sans-serif; background: #f5f5f5; padding: 20px; }
+    .box { background: white; padding: 15px; margin: 10px 0; border-radius: 8px;
+           box-shadow: 0 2px 6px rgba(0,0,0,0.1); }
+    button { width: 100%; padding: 12px; margin-top: 10px; border: none;
+             border-radius: 6px; font-size: 16px; cursor: pointer; }
+    .method { background: #2196f3; color: white; }
+    p { font-size: 14px; margin-top: 6px; word-break: break-word; }
   </style>
 </head>
 <body>
+  <h2>🔗 Wallet Connect Test</h2>
+
+  <!-- Result -->
+  <p id="result">Wallet: Not connected</p>
+
   <div class="box">
-    <h2>HBIRD Claim</h2>
-    <button id="connectBtn">🔗 Connect Wallet</button>
-    <p id="wallet">Wallet: Not connected</p>
-    <input id="amount" type="number" placeholder="Amount HBIRD" value="100">
-    <button id="claimBtn">🎁 Claim Reward</button>
-    <p id="status"></p>
+    <h3>1️⃣ Ethers v5 (Web3Provider)</h3>
+    <button class="method" onclick="connectV5()">Connect v5</button>
+  </div>
+
+  <div class="box">
+    <h3>2️⃣ Ethers v6 (BrowserProvider)</h3>
+    <button class="method" onclick="connectV6()">Connect v6</button>
+  </div>
+
+  <div class="box">
+    <h3>3️⃣ Direct ethereum.request</h3>
+    <button class="method" onclick="connectDirect()">Connect Direct</button>
   </div>
 
 <script>
-const CONTRACT_ADDRESS = "0xb9ccd00c2016444f58e2492117b49da317f4899b";
-const VOUCHER_ENDPOINT = "https://birdfunbackend.vercel.app/api/sign";
-
-const CONTRACT_ABI = [
-  "function claimReward(uint256 amount, uint256 nonce, uint256 expiry, bytes signature) external",
-  "function usedNonces(address player, uint256 nonce) external view returns (bool)"
-];
-
-let provider, signer, contract, playerAddress;
-
-async function connectWallet() {
-  if (!window.ethereum) {
-    alert("Please open in MetaMask / OKX / Bitget in-app browser");
-    return;
-  }
+async function connectV5() {
   try {
-    provider = new ethers.providers.Web3Provider(window.ethereum);
+    if (!window.ethereum) return alert("No wallet detected");
+    const provider = new ethers.providers.Web3Provider(window.ethereum); // v5
     await provider.send("eth_requestAccounts", []);
-    signer = provider.getSigner();
-    contract = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, signer);
-
-    playerAddress = await signer.getAddress();
-    document.getElementById("wallet").innerText = "Wallet: " + playerAddress;
-    document.getElementById("status").innerText = "✅ Connected!";
+    const signer = provider.getSigner();
+    const address = await signer.getAddress();
+    document.getElementById("result").innerText = "✅ v5 Connected: " + address;
   } catch (err) {
-    console.error(err);
-    document.getElementById("status").innerText = "❌ Connect failed: " + err.message;
+    document.getElementById("result").innerText = "❌ v5 Failed: " + err.message;
   }
 }
 
-async function claimReward() {
-  if (!signer || !playerAddress) {
-    alert("Connect wallet first!");
-    return;
-  }
-
-  const amount = document.getElementById("amount").value;
-  if (!amount || amount <= 0) {
-    alert("Enter valid amount");
-    return;
-  }
-
-  let nonce = 1;
-  while (await contract.usedNonces(playerAddress, nonce)) {
-    nonce++;
-  }
-
-  document.getElementById("status").innerText = "Fetching voucher...";
-  const res = await fetch(`${VOUCHER_ENDPOINT}?player=${playerAddress}&amount=${amount}&nonce=${nonce}&contractAddress=${CONTRACT_ADDRESS}`);
-  const voucher = await res.json();
-
-  if (!voucher.success) {
-    document.getElementById("status").innerText = "❌ Failed to get voucher!";
-    return;
-  }
-
+async function connectV6() {
   try {
-    document.getElementById("status").innerText = "⏳ Sending transaction...";
-    const tx = await contract.claimReward(voucher.amountWei, voucher.nonce, voucher.expiry, voucher.signature);
-    await tx.wait();
-    document.getElementById("status").innerText = "✅ Claimed successfully!";
+    if (!window.ethereum) return alert("No wallet detected");
+    const provider = new ethers.BrowserProvider(window.ethereum); // v6
+    await provider.send("eth_requestAccounts", []);
+    const signer = await provider.getSigner();
+    const address = await signer.getAddress();
+    document.getElementById("result").innerText = "✅ v6 Connected: " + address;
   } catch (err) {
-    console.error(err);
-    document.getElementById("status").innerText = "❌ Claim failed: " + err.message;
+    document.getElementById("result").innerText = "❌ v6 Failed: " + err.message;
   }
 }
 
-document.getElementById("connectBtn").onclick = connectWallet;
-document.getElementById("claimBtn").onclick = claimReward;
+async function connectDirect() {
+  try {
+    if (!window.ethereum) return alert("No wallet detected");
+    const accounts = await window.ethereum.request({ method: "eth_requestAccounts" });
+    const address = accounts[0];
+    document.getElementById("result").innerText = "✅ Direct Connected: " + address;
+  } catch (err) {
+    document.getElementById("result").innerText = "❌ Direct Failed: " + err.message;
+  }
+}
 </script>
 </body>
 </html>
