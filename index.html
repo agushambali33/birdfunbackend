@@ -2,30 +2,30 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>HBIRD Voucher + Reward Test</title>
+  <title>HBIRD V4 Full Test</title>
   <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"></script>
   <style>
     body { font-family: monospace; padding:20px; background:#111; color:#eee; }
-    button { margin:6px; padding:10px; font-size:15px; border-radius:8px; cursor:pointer; }
-    input { margin:6px; padding:6px; width:120px; }
+    button, input { margin:6px; padding:10px; font-size:15px; border-radius:8px; }
+    button { cursor:pointer; }
     #debug { background:#000; color:#0f0; padding:10px; height:320px; overflow:auto; white-space:pre-wrap; }
   </style>
 </head>
 <body>
-  <h2>HBIRD Voucher + Reward Test</h2>
+  <h2>HBIRD V4 Full Test</h2>
   
   <div>
     <button id="connectBtn">🔌 Connect Wallet</button>
     <button id="poolBtn" disabled>💰 Check Pool</button>
     <button id="nonceBtn" disabled>🔎 Auto Nonce</button>
-    <button id="claimVoucherBtn" disabled>🎟 Claim Voucher</button>
-    <button id="claimRewardBtn" disabled>🐦 Claim Reward</button>
+    <button id="approveBtn" disabled>✅ Approve HBIRD</button>
+    <button id="depositBtn" disabled>📥 Deposit HBIRD</button>
+    <button id="claimBtn" disabled>🎁 Claim Reward</button>
   </div>
   
   <div>
-    Manual Nonce: <input id="manualNonce" type="number" min="0" value="0">
-    Points: <input id="pointsInput" type="number" min="1" value="100">
     Amount HBIRD: <input id="amountInput" type="number" min="1" value="100">
+    Manual Nonce: <input id="manualNonce" type="number" min="0" value="0">
   </div>
   
   <h3>Debug Log</h3>
@@ -40,14 +40,20 @@ function log(msg) {
 }
 
 let provider, signer, account;
-const VOUCHER_CONTRACT = "0x3b807E75c5b3719B76d3ae0e4B3c9f02984f2F41"; 
-const HBIRD_CONTRACT   = "0xb9ccd00c2016444f58e2492117b49da317f4899b"; 
+
+const TOKEN_ADDR   = "0x5d9C011F4C8aD8efB4252f17e870085936CE296B"; 
+const CONTRACT_V4  = "0xb9ccd00c2016444f58e2492117b49da317f4899b"; 
 
 const ABI = [
-  "function redeemVoucher(address player,uint256 points,uint256 tokenAmount,uint256 nonce,uint256 expiry,bytes signature) external",
   "function getPoolBalance() view returns (uint256)",
   "function usedNonces(address player,uint256 nonce) view returns (bool)",
-  "function claimReward(uint256 amount,uint256 nonce,uint256 expiry,bytes signature) external"
+  "function claimReward(uint256 amount,uint256 nonce,uint256 expiry,bytes signature) external",
+  "function deposit(uint256 amount) external"
+];
+
+const ERC20_ABI = [
+  "function approve(address spender, uint256 amount) external returns (bool)",
+  "function allowance(address owner, address spender) view returns (uint256)"
 ];
 
 const heliosChain = {
@@ -75,7 +81,7 @@ document.getElementById("connectBtn").onclick = async () => {
     log("✅ On Helios Testnet");
   }
 
-  ["poolBtn","nonceBtn","claimVoucherBtn","claimRewardBtn"].forEach(id=>{
+  ["poolBtn","nonceBtn","approveBtn","depositBtn","claimBtn"].forEach(id=>{
     document.getElementById(id).disabled = false;
   });
 };
@@ -83,7 +89,7 @@ document.getElementById("connectBtn").onclick = async () => {
 // Check Pool
 document.getElementById("poolBtn").onclick = async () => {
   try {
-    const contract = new ethers.Contract(VOUCHER_CONTRACT, ABI, provider);
+    const contract = new ethers.Contract(CONTRACT_V4, ABI, provider);
     const bal = await contract.getPoolBalance();
     log("Pool balance: " + ethers.utils.formatUnits(bal,18) + " HBIRD");
   } catch (e) {
@@ -94,7 +100,7 @@ document.getElementById("poolBtn").onclick = async () => {
 // Auto Nonce
 document.getElementById("nonceBtn").onclick = async () => {
   try {
-    const contract = new ethers.Contract(VOUCHER_CONTRACT, ABI, provider);
+    const contract = new ethers.Contract(CONTRACT_V4, ABI, provider);
     let n = 0;
     while (await contract.usedNonces(account, n)) n++;
     document.getElementById("manualNonce").value = n;
@@ -104,54 +110,52 @@ document.getElementById("nonceBtn").onclick = async () => {
   }
 };
 
-// Claim Voucher
-document.getElementById("claimVoucherBtn").onclick = async () => {
+// Approve HBIRD
+document.getElementById("approveBtn").onclick = async () => {
   try {
-    const points = document.getElementById("pointsInput").value;
+    const amount = document.getElementById("amountInput").value;
+    const token = new ethers.Contract(TOKEN_ADDR, ERC20_ABI, signer);
+    const tx = await token.approve(CONTRACT_V4, ethers.utils.parseUnits(amount,18));
+    log("⛓️ Approve TX sent: " + tx.hash);
+    await tx.wait();
+    log("✅ Approve confirmed");
+  } catch (e) {
+    log("❌ Approve error: " + e.message);
+  }
+};
+
+// Deposit HBIRD
+document.getElementById("depositBtn").onclick = async () => {
+  try {
+    const amount = document.getElementById("amountInput").value;
+    const contract = new ethers.Contract(CONTRACT_V4, ABI, signer);
+    const tx = await contract.deposit(ethers.utils.parseUnits(amount,18));
+    log("⛓️ Deposit TX sent: " + tx.hash);
+    await tx.wait();
+    log("✅ Deposit confirmed");
+  } catch (e) {
+    log("❌ Deposit error: " + e.message);
+  }
+};
+
+// Claim Reward
+document.getElementById("claimBtn").onclick = async () => {
+  try {
+    const amount = document.getElementById("amountInput").value;
     let nonce = document.getElementById("manualNonce").value;
-    const backendUrl = "https://birdfun.vercel.app/api/sign";
-    const url = `${backendUrl}?player=${account}&points=${points}&nonce=${nonce}&contractAddress=${VOUCHER_CONTRACT}`;
-    
-    log("Fetching voucher...");
+
+    // ambil voucher dari backend
+    const backendUrl = "https://birdfunbackend.vercel.app/api/sign";
+    const url = `${backendUrl}?player=${account}&amount=${amount}&nonce=${nonce}&contractAddress=${CONTRACT_V4}`;
+    log("Fetching voucher: " + url);
+
     const res = await fetch(url);
     const voucher = await res.json();
     log("Voucher: " + JSON.stringify(voucher));
 
-    const contract = new ethers.Contract(VOUCHER_CONTRACT, ABI, signer);
-    const tx = await contract.redeemVoucher(
-      voucher.player,
-      voucher.points,
-      voucher.tokenAmount,
-      voucher.nonce,
-      voucher.expiry,
-      voucher.signature
-    );
-    log("⛓️ Voucher TX sent: " + tx.hash);
-    const rc = await tx.wait();
-    log("✅ Voucher Claimed, block " + rc.blockNumber);
-  } catch (e) {
-    log("❌ Voucher claim error: " + e.message);
-  }
-};
+    if (!voucher.signature) return log("❌ Voucher failed");
 
-// Claim Reward HBIRD
-document.getElementById("claimRewardBtn").onclick = async () => {
-  try {
-    const amount = document.getElementById("amountInput").value;
-    let nonce = 1;
-    const contractRead = new ethers.Contract(HBIRD_CONTRACT, ABI, provider);
-    while (await contractRead.usedNonces(account, nonce)) nonce++;
-    log("Using nonce: " + nonce);
-
-    const backendUrl = "https://birdfunbackend.vercel.app/api/sign";
-    const url = `${backendUrl}?player=${account}&amount=${amount}&nonce=${nonce}&contractAddress=${HBIRD_CONTRACT}`;
-    
-    log("Fetching reward voucher...");
-    const res = await fetch(url);
-    const voucher = await res.json();
-    log("Reward voucher: " + JSON.stringify(voucher));
-
-    const contract = new ethers.Contract(HBIRD_CONTRACT, ABI, signer);
+    const contract = new ethers.Contract(CONTRACT_V4, ABI, signer);
     const tx = await contract.claimReward(
       voucher.amountWei,
       voucher.nonce,
@@ -162,7 +166,7 @@ document.getElementById("claimRewardBtn").onclick = async () => {
     const rc = await tx.wait();
     log("✅ Reward Claimed, block " + rc.blockNumber);
   } catch (e) {
-    log("❌ Reward claim error: " + e.message);
+    log("❌ Claim error: " + e.message);
   }
 };
 </script>
