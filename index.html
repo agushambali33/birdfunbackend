@@ -2,105 +2,60 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>HBIRD Claim (Mobile)</title>
+  <title>HBIRD Claim</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <script src="https://cdn.jsdelivr.net/npm/ethers/dist/ethers.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/ethers@6.6.4/dist/ethers.min.js"></script>
   <style>
-    body { font-family: Arial, sans-serif; margin: 0; padding: 0; background: #f9f9f9;
-           display: flex; flex-direction: column; align-items: center; min-height: 100vh; }
-    h2 { margin-top: 20px; font-size: 20px; text-align: center; }
-    .container { width: 90%; max-width: 400px; background: #fff; padding: 20px; margin-top: 20px;
-                 border-radius: 10px; box-shadow: 0 2px 6px rgba(0,0,0,0.1); }
-    button { width: 100%; padding: 15px; margin-top: 10px; border: none; border-radius: 8px;
-             font-size: 16px; font-weight: bold; color: white; background: #ff9800; cursor: pointer; }
-    button:active { background: #e68900; }
-    input { width: 100%; padding: 12px; margin-top: 10px; border-radius: 8px; border: 1px solid #ccc;
-            font-size: 16px; box-sizing: border-box; }
-    p { margin-top: 10px; font-size: 14px; word-break: break-word; }
-    #status { font-weight: bold; text-align: center; }
+    body { font-family: Arial, sans-serif; margin: 0; padding: 0; display: flex; justify-content: center; align-items: center; height: 100vh; background: #f5f5f5; }
+    .box { width: 90%; max-width: 400px; background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 6px rgba(0,0,0,0.1); text-align: center; }
+    button { width: 100%; padding: 15px; margin: 10px 0; border: none; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer; }
+    #connectBtn { background: #2196f3; color: white; }
+    #claimBtn { background: #4caf50; color: white; }
+    input { width: 100%; padding: 12px; margin-top: 10px; border: 1px solid #ccc; border-radius: 8px; }
+    p { font-size: 14px; margin-top: 8px; word-break: break-word; }
   </style>
 </head>
 <body>
-  <h2>HBIRD Claim (Helios Testnet)</h2>
-  <div class="container">
+  <div class="box">
+    <h2>HBIRD Claim</h2>
     <button id="connectBtn">🦊 Connect Wallet</button>
     <p id="wallet">Wallet: Not connected</p>
-
-    <input id="amount" type="number" placeholder="Amount HBIRD" value="100" />
+    <input id="amount" type="number" placeholder="Amount HBIRD" value="100">
     <button id="claimBtn">🎁 Claim Reward</button>
-    
     <p id="status"></p>
   </div>
 
 <script>
 const CONTRACT_ADDRESS = "0xb9ccd00c2016444f58e2492117b49da317f4899b";
 const VOUCHER_ENDPOINT = "https://birdfunbackend.vercel.app/api/sign";
-const HELIOS_RPC = "https://testnet1.helioschainlabs.org";
 
 const CONTRACT_ABI = [
   "function claimReward(uint256 amount, uint256 nonce, uint256 expiry, bytes signature) external",
   "function usedNonces(address player, uint256 nonce) external view returns (bool)"
 ];
 
-let provider, signer, contract;
-let playerAddress = null;
+let provider, signer, contract, playerAddress;
 
-// === Connect Wallet ===
 async function connectWallet() {
   if (!window.ethereum) {
-    alert("Please install MetaMask / Trust Wallet");
+    alert("Install MetaMask / Trust Wallet");
     return;
   }
-
   try {
-    // switch ke Helios testnet (42000 = 0xa410 hex)
-    await window.ethereum.request({
-      method: "wallet_switchEthereumChain",
-      params: [{ chainId: "0xa410" }]
-    });
-  } catch (switchError) {
-    if (switchError.code === 4902) {
-      await window.ethereum.request({
-        method: "wallet_addEthereumChain",
-        params: [{
-          chainId: "0xa410",
-          chainName: "Helios Testnet",
-          nativeCurrency: { name: "tHLS", symbol: "tHLS", decimals: 18 },
-          rpcUrls: [HELIOS_RPC],
-          blockExplorerUrls: []
-        }]
-      });
-    }
+    provider = new ethers.BrowserProvider(window.ethereum);
+    await provider.send("eth_requestAccounts", []);
+    signer = await provider.getSigner();
+    contract = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, signer);
+
+    playerAddress = await signer.getAddress();
+    document.getElementById("wallet").innerText = "Wallet: " + playerAddress;
+    document.getElementById("status").innerText = "✅ Connected!";
+  } catch (err) {
+    console.error(err);
+    document.getElementById("status").innerText = "❌ Connect failed: " + err.message;
   }
-
-  provider = new ethers.providers.Web3Provider(window.ethereum);
-  await provider.send("eth_requestAccounts", []);
-  signer = provider.getSigner();
-  contract = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, signer);
-
-  playerAddress = await signer.getAddress();
-  document.getElementById("wallet").innerText = `Wallet: ${playerAddress}`;
-  document.getElementById("status").innerText = "✅ Connected!";
 }
 
-// === Handle account changes (mobile MetaMask/Trust) ===
-if (window.ethereum) {
-  window.ethereum.on("accountsChanged", async (accounts) => {
-    if (accounts.length > 0) {
-      playerAddress = accounts[0];
-      provider = new ethers.providers.Web3Provider(window.ethereum);
-      signer = provider.getSigner();
-      contract = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, signer);
-      document.getElementById("wallet").innerText = `Wallet: ${playerAddress}`;
-      document.getElementById("status").innerText = "✅ Account switched!";
-    } else {
-      playerAddress = null;
-      document.getElementById("wallet").innerText = "Wallet: Not connected";
-    }
-  });
-}
-
-// === Claim Reward ===
 async function claimReward() {
   if (!signer || !playerAddress) {
     alert("Connect wallet first!");
@@ -113,16 +68,13 @@ async function claimReward() {
     return;
   }
 
-  // cari nonce yang belum dipakai
   let nonce = 1;
   while (await contract.usedNonces(playerAddress, nonce)) {
     nonce++;
   }
 
   document.getElementById("status").innerText = "Fetching voucher...";
-  const res = await fetch(
-    `${VOUCHER_ENDPOINT}?player=${playerAddress}&amount=${amount}&nonce=${nonce}&contractAddress=${CONTRACT_ADDRESS}`
-  );
+  const res = await fetch(`${VOUCHER_ENDPOINT}?player=${playerAddress}&amount=${amount}&nonce=${nonce}&contractAddress=${CONTRACT_ADDRESS}`);
   const voucher = await res.json();
 
   if (!voucher.success) {
@@ -131,18 +83,13 @@ async function claimReward() {
   }
 
   try {
-    document.getElementById("status").innerText = "⏳ Sending tx...";
-    const tx = await contract.claimReward(
-      voucher.amountWei,
-      voucher.nonce,
-      voucher.expiry,
-      voucher.signature
-    );
+    document.getElementById("status").innerText = "⏳ Sending transaction...";
+    const tx = await contract.claimReward(voucher.amountWei, voucher.nonce, voucher.expiry, voucher.signature);
     await tx.wait();
     document.getElementById("status").innerText = "✅ Claimed successfully!";
   } catch (err) {
     console.error(err);
-    document.getElementById("status").innerText = "❌ Claim failed: " + (err?.message || "");
+    document.getElementById("status").innerText = "❌ Claim failed: " + err.message;
   }
 }
 
