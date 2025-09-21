@@ -1,96 +1,243 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <meta charset="utf-8">
-  <title>Voucher Claim Test</title>
+  <meta charset="utf-8" />
+  <title>Voucher Claim Test (final)</title>
   <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"></script>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
   <style>
-    body { font-family: Arial, sans-serif; padding: 20px; }
-    button { padding: 10px 15px; margin: 5px; cursor: pointer; }
-    #status { margin-top: 15px; }
-    pre { background: #f4f4f4; padding: 10px; border-radius: 5px; }
+    body { font-family: Inter, Arial, sans-serif; padding: 16px; background:#f7fafc; color:#111; }
+    button { padding:10px 14px; margin:6px; border-radius:8px; border:0; cursor:pointer; background:#2563eb; color:white; }
+    button.secondary { background:#6b7280 }
+    #log { background:#0b1220; color:#c7f9d6; padding:12px; height:340px; overflow:auto; border-radius:8px; font-family:monospace; font-size:13px; }
+    input[type="number"] { padding:6px 8px; margin:6px; width:120px; }
+    .row { display:flex; gap:8px; align-items:center; margin-bottom:8px; flex-wrap:wrap; }
+    label { font-size:13px; }
   </style>
 </head>
 <body>
-  <h2>🎁 Voucher Claim DApp</h2>
-  <button onclick="connectWallet()">🦊 Connect Wallet</button>
-  <button onclick="checkPool()">💰 Check Pool Balance</button>
-  <button onclick="claimVoucher()">🎟 Claim Voucher</button>
+  <h2>Voucher Claim — Test Page</h2>
 
-  <div id="status">Not connected</div>
-  <pre id="log"></pre>
+  <div class="row">
+    <button id="connectBtn">🦊 Connect Wallet</button>
+    <button id="poolBtn" class="secondary">💰 Check Pool</button>
+    <button id="nonceBtn" class="secondary">🔎 Auto Nonce</button>
+    <button id="claimBtn">🎟 Claim</button>
+  </div>
+
+  <div class="row">
+    <label>Manual Nonce:</label>
+    <input id="manualNonce" type="number" min="0" value="0" />
+    <label>Points:</label>
+    <input id="pointsInput" type="number" min="1" value="100" />
+  </div>
+
+  <div class="row">
+    <div><strong>Status:</strong> <span id="status">not connected</span></div>
+    <div style="margin-left:12px"><strong>Contract Operator:</strong> <span id="operator">-</span></div>
+  </div>
+
+  <div id="log"></div>
 
   <script>
     const CONTRACT_ADDRESS = "0x3b807E75c5b3719B76d3ae0e4B3c9f02984f2F41";
+    const HELIOS_RPC = "https://testnet1.helioschainlabs.org";
     const ABI = [
       "function redeemVoucher(address player,uint256 points,uint256 tokenAmount,uint256 nonce,uint256 expiry,bytes signature) external",
-      "function getPoolBalance() external view returns (uint256)"
+      "function usedNonces(address player,uint256 nonce) external view returns (bool)",
+      "function getPoolBalance() external view returns (uint256)",
+      "function operator() external view returns (address)"
     ];
 
-    let provider, signer, contract, player;
+    let provider, signer, player, contract, contractReadOnly;
 
-    function log(msg) {
-      const logBox = document.getElementById("log");
-      logBox.textContent += msg + "\n";
-      logBox.scrollTop = logBox.scrollHeight;
+    function log(...args) {
+      const el = document.getElementById("log");
+      const line = args.map(a => (typeof a === "object" ? JSON.stringify(a) : String(a))).join(" ");
+      el.textContent += line + "\n";
+      el.scrollTop = el.scrollHeight;
     }
+
+    function short(addr) { return addr ? addr.slice(0,6) + "…" + addr.slice(-4) : "-"; }
 
     async function connectWallet() {
       try {
+        if (!window.ethereum) throw new Error("No injected wallet (install MetaMask)");
         provider = new ethers.providers.Web3Provider(window.ethereum);
         await provider.send("eth_requestAccounts", []);
         signer = provider.getSigner();
         player = await signer.getAddress();
         contract = new ethers.Contract(CONTRACT_ADDRESS, ABI, signer);
-        document.getElementById("status").innerText = "✅ Wallet connected: " + player;
-        log("Wallet connected: " + player);
+        contractReadOnly = new ethers.Contract(CONTRACT_ADDRESS, ABI, provider);
+
+        document.getElementById("status").innerText = player;
+        log("✅ Wallet connected:", player);
+        // show operator from contract for debug
+        try {
+          const op = await contractReadOnly.operator();
+          document.getElementById("operator").innerText = op;
+          log("Contract operator:", op);
+        } catch (e) {
+          document.getElementById("operator").innerText = "n/a";
+          log("Could not read operator():", e.message || e);
+        }
       } catch (err) {
-        log("Connect error: " + err.message);
+        log("Connect error:", err.message || err);
+        alert("Connect failed: " + (err.message || err));
       }
     }
 
     async function checkPool() {
       try {
-        const bal = await contract.getPoolBalance();
-        log("Pool balance: " + ethers.utils.formatUnits(bal, 18) + " Hbird");
+        if (!contractReadOnly) {
+          // try read-only provider fallback
+          const readProvider = new ethers.providers.JsonRpcProvider(HELIOS_RPC);
+          const rContract = new ethers.Contract(CONTRACT_ADDRESS, ABI, readProvider);
+          const b = await rContract.getPoolBalance();
+          log("Pool balance (read):", ethers.utils.formatUnits(b,18));
+        } else {
+          const b = await contractReadOnly.getPoolBalance();
+          log("Pool balance:", ethers.utils.formatUnits(b,18));
+        }
       } catch (err) {
-        log("Pool check error: " + err.message);
+        log("Pool error:", err.message || err);
+      }
+    }
+
+    async function getNextNonceAuto() {
+      if (!contractReadOnly || !player) {
+        log("Auto-nonce requires connected wallet and contractReadOnly");
+        return null;
+      }
+      try {
+        let n = 0;
+        // loop until mapping returns false
+        while (true) {
+          const used = await contractReadOnly.usedNonces(player, n);
+          if (!used) break;
+          n++;
+          if (n > 1000000) { log("Too many nonces, abort"); break; }
+        }
+        document.getElementById("manualNonce").value = n;
+        log("Auto next nonce:", n);
+        return n;
+      } catch (err) {
+        log("Auto-nonce failed (call reverted). Use manual nonce:", err.message || err);
+        return null;
       }
     }
 
     async function claimVoucher() {
       try {
         if (!player) throw new Error("Wallet not connected");
+        const manualNonceEl = document.getElementById("manualNonce");
+        const points = Number(document.getElementById("pointsInput").value) || 0;
+        if (points <= 0) throw new Error("Points must be > 0");
 
-        const nonce = Math.floor(Date.now() / 1000); // bisa diganti nonce counter backend
-        const points = 100;
+        // try auto first
+        let nonce = await getNextNonceAuto();
+        if (nonce === null) { nonce = Number(manualNonceEl.value || 0); log("Using manual nonce:", nonce); }
+        else manualNonceEl.value = nonce;
 
-        // 1. Fetch voucher dari backend (Vercel serverless)
+        log("Using nonce", nonce, "points", points);
+
+        // build server URL (relative; works on Vercel)
         const url = `/api/sign?player=${player}&points=${points}&nonce=${nonce}&contractAddress=${CONTRACT_ADDRESS}`;
-        log("Fetching voucher: " + url);
+        log("Fetching voucher:", url);
 
-        const res = await fetch(url);
-        const voucher = await res.json();
-        log("Voucher: " + JSON.stringify(voucher, null, 2));
+        const raw = await fetch(url);
+        const text = await raw.text();
+        // debug: if server returns HTML, show it
+        try {
+          const voucher = JSON.parse(text);
+          log("Voucher:", voucher);
 
-        if (!voucher.signature) throw new Error("Voucher tidak valid / tidak ada signature");
+          if (!voucher.success) {
+            throw new Error("Voucher endpoint returned success=false: " + (voucher.error || JSON.stringify(voucher)));
+          }
 
-        // 2. Panggil redeemVoucher ke kontrak
-        const tx = await contract.redeemVoucher(
-          voucher.player,
-          voucher.points,
-          voucher.tokenAmount,
-          voucher.nonce,
-          voucher.expiry,
-          voucher.signature
-        );
+          // show operator vs signer for debug
+          try {
+            const op = await contractReadOnly.operator();
+            log("contract.operator():", op);
+            log("voucher.signerAddress:", voucher.signerAddress);
+          } catch (e) {
+            log("Couldn't read operator():", e.message || e);
+          }
 
-        log("Tx sent: " + tx.hash);
-        await tx.wait();
-        log("✅ Voucher claimed sukses!");
+          // call redeemVoucher
+          // tokenAmount field is tokenAmount (wei) as string
+          const tokenAmount = ethers.BigNumber.from(voucher.tokenAmount);
+          const txData = contract.redeemVoucher(
+            voucher.player,
+            ethers.BigNumber.from(voucher.points),
+            tokenAmount,
+            ethers.BigNumber.from(voucher.nonce),
+            ethers.BigNumber.from(voucher.expiry),
+            voucher.signature
+          );
+
+          // Try sending with manual gasLimit if estimate fails
+          try {
+            log("Estimating gas...");
+            const gasEstimate = await contract.estimateGas.redeemVoucher(
+              voucher.player,
+              ethers.BigNumber.from(voucher.points),
+              tokenAmount,
+              ethers.BigNumber.from(voucher.nonce),
+              ethers.BigNumber.from(voucher.expiry),
+              voucher.signature
+            );
+            log("Gas estimate:", gasEstimate.toString());
+            const tx = await contract.redeemVoucher(
+              voucher.player,
+              ethers.BigNumber.from(voucher.points),
+              tokenAmount,
+              ethers.BigNumber.from(voucher.nonce),
+              ethers.BigNumber.from(voucher.expiry),
+              voucher.signature,
+              { gasLimit: gasEstimate.mul(120).div(100) } // add 20% buffer
+            );
+            log("Tx sent:", tx.hash);
+            await tx.wait();
+            log("✅ Claim success. Tx:", tx.hash);
+          } catch (estErr) {
+            log("Estimate failed / may revert:", estErr.message || estErr);
+            log("Trying hardcoded gasLimit 500000...");
+            try {
+              const tx2 = await contract.redeemVoucher(
+                voucher.player,
+                ethers.BigNumber.from(voucher.points),
+                tokenAmount,
+                ethers.BigNumber.from(voucher.nonce),
+                ethers.BigNumber.from(voucher.expiry),
+                voucher.signature,
+                { gasLimit: 500000 }
+              );
+              log("Tx sent (manual gasLimit):", tx2.hash);
+              await tx2.wait();
+              log("✅ Claim success. Tx:", tx2.hash);
+            } catch (sendErr) {
+              log("❌ Claim failed:", sendErr.message || sendErr);
+            }
+          }
+        } catch (parseErr) {
+          log("Failed to parse voucher response. Raw text:", text.slice(0,800));
+          throw new Error("Voucher endpoint response not JSON (see log)");
+        }
       } catch (err) {
-        log("❌ Claim failed: " + err.message);
+        log("Claim flow error:", err.message || err);
       }
+    }
+
+    document.getElementById("connectBtn").onclick = connectWallet;
+    document.getElementById("poolBtn").onclick = checkPool;
+    document.getElementById("nonceBtn").onclick = getNextNonceAuto;
+    document.getElementById("claimBtn").onclick = claimVoucher;
+
+    // optional: try auto-connect if wallet available
+    if (window.ethereum && window.ethereum.selectedAddress) {
+      connectWallet().catch(()=>{});
     }
   </script>
 </body>
