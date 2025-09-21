@@ -2,8 +2,9 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>HBIRD Claim (Direct Connect)</title>
+  <title>HBIRD Claim</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!-- CDN ethers v5 -->
   <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.min.js"></script>
   <style>
     body { font-family: Arial, sans-serif; background: #f5f5f5; margin: 0; padding: 0;
@@ -39,9 +40,10 @@ const CONTRACT_ABI = [
 
 let provider, signer, contract, playerAddress;
 
+// ✅ direct connect
 async function connectWallet() {
   if (!window.ethereum) {
-    alert("Please open in OKX / Bitget / MetaMask in-app browser");
+    alert("Please open in OKX / Bitget / MetaMask browser");
     return;
   }
   try {
@@ -72,6 +74,7 @@ async function claimReward() {
     return;
   }
 
+  // cari nonce
   let nonce = 1;
   while (await contract.usedNonces(playerAddress, nonce)) {
     nonce++;
