@@ -12,7 +12,7 @@ export default async function handler(req, res) {
   try {
     const q = req.query || {};
     const player = q.player;
-    const amount = q.amount ?? "0"; // jumlah token (dalam HBIRD, bukan Wei)
+    const amount = q.amount ?? "0"; // jumlah points (bukan HBIRD langsung)
     const nonce = q.nonce ?? "1";
     const contractAddress = q.contractAddress ?? "0xb9ccd00c2016444f58e2492117b49da317f4899b";
 
@@ -34,8 +34,9 @@ export default async function handler(req, res) {
     // Expiry = 1 jam ke depan
     const expiry = Math.floor(Date.now() / 1000) + 60 * 60;
 
-    // Konversi amount → Wei (18 decimals)
-    const amountWei = ethers.utils.parseUnits(amount.toString(), 18);
+    // Konversi amount (points) ke HBIRD: 1 point = 0.5 HBIRD, lalu ke Wei (18 decimals)
+    const hbirdAmount = parseFloat(amount) * 0.5; // Rate 1 point = 0.5 HBIRD
+    const amountWei = ethers.utils.parseUnits(hbirdAmount.toString(), 18);
 
     // Buat payload hash sesuai kontrak V4
     // keccak256(abi.encodePacked(player, amount, nonce, expiry, contractAddress))
@@ -53,7 +54,8 @@ export default async function handler(req, res) {
     return res.status(200).json({
       success: recovered.toLowerCase() === wallet.address.toLowerCase(),
       player,
-      amount: amount.toString(),
+      amount: amount.toString(), // amount as points
+      hbirdAmount: hbirdAmount.toString(), // amount in HBIRD for clarity
       amountWei: amountWei.toString(),
       nonce: nonce.toString(),
       expiry,
