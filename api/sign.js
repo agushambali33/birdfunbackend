@@ -1,4 +1,3 @@
-// api/sign.js
 const { ethers } = require("ethers");
 
 module.exports = async (req, res) => {
@@ -49,7 +48,7 @@ module.exports = async (req, res) => {
       )
     );
 
-    // ====== Sign ======
+    // ====== Sign (ethers signMessage otomatis kasih prefix) ======
     const signature = await wallet.signMessage(ethers.utils.arrayify(payloadHash));
 
     // Verify signer buat debug
