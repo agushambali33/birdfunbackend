@@ -1,107 +1,174 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
+  <meta charset="utf-8" />
   <title>HBIRD Claim</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <!-- CDN ethers v5 -->
-  <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"></script>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
   <style>
-    body { font-family: Arial, sans-serif; background: #f5f5f5; margin: 0; padding: 0;
-           display: flex; justify-content: center; align-items: center; height: 100vh; }
-    .box { width: 90%; max-width: 400px; background: white; padding: 20px; border-radius: 10px;
-           box-shadow: 0 2px 6px rgba(0,0,0,0.1); text-align: center; }
-    button { width: 100%; padding: 14px; margin: 10px 0; border: none; border-radius: 8px;
-             font-size: 16px; font-weight: bold; cursor: pointer; }
-    #connectBtn { background: #ff6600; color: white; }
-    #claimBtn { background: #4caf50; color: white; }
-    input { width: 100%; padding: 12px; margin-top: 10px; border: 1px solid #ccc; border-radius: 8px; }
-    p { font-size: 14px; margin-top: 8px; word-break: break-word; }
+    body { font-family: Inter, Arial, sans-serif; padding: 16px; background:#f7fafc; color:#111; }
+    button { padding:10px 14px; margin:6px; border-radius:8px; border:0; cursor:pointer; background:#2563eb; color:white; }
+    button.secondary { background:#6b7280 }
+    #log { background:#0b1220; color:#c7f9d6; padding:12px; height:280px; overflow:auto; border-radius:8px; font-family:monospace; font-size:13px; }
+    input[type="number"] { padding:6px 8px; margin:6px; width:120px; }
+    .row { display:flex; gap:8px; align-items:center; margin-bottom:8px; flex-wrap:wrap; }
+    label { font-size:13px; }
   </style>
 </head>
 <body>
-  <div class="box">
-    <h2>HBIRD Claim</h2>
-    <button id="connectBtn">🔗 Connect Wallet</button>
-    <p id="wallet">Wallet: Not connected</p>
-    <input id="amount" type="number" placeholder="Amount HBIRD" value="100">
-    <button id="claimBtn">🎁 Claim Reward</button>
-    <p id="status"></p>
+  <h2>HBIRD — Claim Reward</h2>
+
+  <div class="row">
+    <button id="connectBtn">🦊 Connect Wallet</button>
+    <button id="poolBtn" class="secondary">💰 Check Pool</button>
+    <button id="nonceBtn" class="secondary">🔎 Auto Nonce</button>
+    <button id="claimBtn">🎁 Claim</button>
   </div>
 
-<script>
-const CONTRACT_ADDRESS = "0xb9ccd00c2016444f58e2492117b49da317f4899b";
-const VOUCHER_ENDPOINT = "https://birdfunbackend.vercel.app/api/sign";
+  <div class="row">
+    <label>Manual Nonce:</label>
+    <input id="manualNonce" type="number" min="0" value="0" />
+    <label>Amount HBIRD:</label>
+    <input id="amountInput" type="number" min="1" value="100" />
+  </div>
 
-const CONTRACT_ABI = [
-  "function claimReward(uint256 amount, uint256 nonce, uint256 expiry, bytes signature) external",
-  "function usedNonces(address player, uint256 nonce) external view returns (bool)"
-];
+  <div class="row">
+    <div><strong>Status:</strong> <span id="status">not connected</span></div>
+    <div style="margin-left:12px"><strong>Operator:</strong> <span id="operator">-</span></div>
+  </div>
 
-let provider, signer, contract, playerAddress;
+  <div id="log"></div>
 
-// ✅ direct connect
-async function connectWallet() {
-  if (!window.ethereum) {
-    alert("Please open in OKX / Bitget / MetaMask browser");
-    return;
-  }
-  try {
-    const accounts = await window.ethereum.request({ method: "eth_requestAccounts" });
-    playerAddress = accounts[0];
+  <script>
+    const CONTRACT_ADDRESS = "0xb9ccd00c2016444f58e2492117b49da317f4899b";
+    const HELIOS_RPC = "https://testnet1.helioschainlabs.org";
+    const ABI = [
+      "function claimReward(uint256 amount,uint256 nonce,uint256 expiry,bytes signature) external",
+      "function usedNonces(address player,uint256 nonce) external view returns (bool)",
+      "function operator() external view returns (address)",
+      "function getPoolBalance() external view returns (uint256)"
+    ];
 
-    provider = new ethers.providers.Web3Provider(window.ethereum);
-    signer = provider.getSigner();
-    contract = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, signer);
+    let provider, signer, player, contract, contractReadOnly;
 
-    document.getElementById("wallet").innerText = "✅ Connected: " + playerAddress;
-    document.getElementById("status").innerText = "";
-  } catch (err) {
-    console.error(err);
-    document.getElementById("status").innerText = "❌ Connect failed: " + err.message;
-  }
-}
+    function log(...args) {
+      const el = document.getElementById("log");
+      const line = args.map(a => (typeof a === "object" ? JSON.stringify(a) : String(a))).join(" ");
+      el.textContent += line + "\n";
+      el.scrollTop = el.scrollHeight;
+    }
 
-async function claimReward() {
-  if (!signer || !playerAddress) {
-    alert("Connect wallet first!");
-    return;
-  }
+    async function connectWallet() {
+      try {
+        if (!window.ethereum) throw new Error("No injected wallet (install MetaMask/OKX/Bitget)");
+        provider = new ethers.providers.Web3Provider(window.ethereum);
+        await provider.send("eth_requestAccounts", []);
+        signer = provider.getSigner();
+        player = await signer.getAddress();
+        contract = new ethers.Contract(CONTRACT_ADDRESS, ABI, signer);
+        contractReadOnly = new ethers.Contract(CONTRACT_ADDRESS, ABI, provider);
 
-  const amount = document.getElementById("amount").value;
-  if (!amount || amount <= 0) {
-    alert("Enter valid amount");
-    return;
-  }
+        document.getElementById("status").innerText = player;
+        log("✅ Wallet connected:", player);
 
-  // cari nonce
-  let nonce = 1;
-  while (await contract.usedNonces(playerAddress, nonce)) {
-    nonce++;
-  }
+        try {
+          const op = await contractReadOnly.operator();
+          document.getElementById("operator").innerText = op;
+          log("Contract operator:", op);
+        } catch (e) {
+          document.getElementById("operator").innerText = "n/a";
+          log("Could not read operator():", e.message || e);
+        }
+      } catch (err) {
+        log("Connect error:", err.message || err);
+        alert("Connect failed: " + (err.message || err));
+      }
+    }
 
-  document.getElementById("status").innerText = "Fetching voucher...";
-  const res = await fetch(`${VOUCHER_ENDPOINT}?player=${playerAddress}&amount=${amount}&nonce=${nonce}&contractAddress=${CONTRACT_ADDRESS}`);
-  const voucher = await res.json();
+    async function checkPool() {
+      try {
+        const readProvider = new ethers.providers.JsonRpcProvider(HELIOS_RPC);
+        const rContract = new ethers.Contract(CONTRACT_ADDRESS, ABI, readProvider);
+        const b = await rContract.getPoolBalance();
+        log("Pool balance:", ethers.utils.formatUnits(b,18), "HBIRD");
+      } catch (err) {
+        log("Pool error:", err.message || err);
+      }
+    }
 
-  if (!voucher.success) {
-    document.getElementById("status").innerText = "❌ Failed to get voucher!";
-    return;
-  }
+    async function getNextNonceAuto() {
+      if (!contractReadOnly || !player) {
+        log("Auto-nonce requires connected wallet");
+        return null;
+      }
+      try {
+        let n = 1;
+        while (true) {
+          const used = await contractReadOnly.usedNonces(player, n);
+          if (!used) break;
+          n++;
+          if (n > 1000000) { log("Too many nonces, abort"); break; }
+        }
+        document.getElementById("manualNonce").value = n;
+        log("Auto next nonce:", n);
+        return n;
+      } catch (err) {
+        log("Auto-nonce failed:", err.message || err);
+        return null;
+      }
+    }
 
-  try {
-    document.getElementById("status").innerText = "⏳ Sending transaction...";
-    const tx = await contract.claimReward(voucher.amountWei, voucher.nonce, voucher.expiry, voucher.signature);
-    await tx.wait();
-    document.getElementById("status").innerText = "✅ Claimed successfully!";
-  } catch (err) {
-    console.error(err);
-    document.getElementById("status").innerText = "❌ Claim failed: " + err.message;
-  }
-}
+    async function claimReward() {
+      try {
+        if (!player) throw new Error("Wallet not connected");
+        const amount = Number(document.getElementById("amountInput").value) || 0;
+        if (amount <= 0) throw new Error("Amount must be > 0");
 
-document.getElementById("connectBtn").onclick = connectWallet;
-document.getElementById("claimBtn").onclick = claimReward;
-</script>
+        let nonce = await getNextNonceAuto();
+        if (nonce === null) {
+          nonce = Number(document.getElementById("manualNonce").value || 1);
+          log("Using manual nonce:", nonce);
+        } else {
+          document.getElementById("manualNonce").value = nonce;
+        }
+
+        log("Claim flow: player", player, "amount", amount, "nonce", nonce);
+
+        const url = `/api/sign?player=${player}&amount=${amount}&nonce=${nonce}&contractAddress=${CONTRACT_ADDRESS}`;
+        log("Fetching voucher:", url);
+
+        const raw = await fetch(url);
+        const text = await raw.text();
+        const voucher = JSON.parse(text);
+        log("Voucher:", voucher);
+
+        if (!voucher.success) throw new Error("Voucher failed: " + (voucher.error || "unknown"));
+
+        // Call claimReward
+        const tx = await contract.claimReward(
+          ethers.BigNumber.from(voucher.amountWei),
+          ethers.BigNumber.from(voucher.nonce),
+          ethers.BigNumber.from(voucher.expiry),
+          voucher.signature
+        );
+
+        log("Tx sent:", tx.hash);
+        await tx.wait();
+        log("✅ Claim success. Tx:", tx.hash);
+
+      } catch (err) {
+        log("❌ Claim error:", err.message || err);
+      }
+    }
+
+    document.getElementById("connectBtn").onclick = connectWallet;
+    document.getElementById("poolBtn").onclick = checkPool;
+    document.getElementById("nonceBtn").onclick = getNextNonceAuto;
+    document.getElementById("claimBtn").onclick = claimReward;
+
+    if (window.ethereum && window.ethereum.selectedAddress) {
+      connectWallet().catch(()=>{});
+    }
+  </script>
 </body>
 </html>
