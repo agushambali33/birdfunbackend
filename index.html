@@ -2,24 +2,82 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>HBIRD Claim Test</title>
+  <title>HBIRD Claim (Mobile)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"> <!-- penting biar responsive -->
   <script src="https://cdn.jsdelivr.net/npm/ethers/dist/ethers.min.js"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0; padding: 0;
+      background: #f9f9f9;
+      display: flex; flex-direction: column; align-items: center;
+      min-height: 100vh;
+    }
+    h2 {
+      margin-top: 20px;
+      font-size: 20px;
+      text-align: center;
+    }
+    .container {
+      width: 90%;
+      max-width: 400px;
+      background: #fff;
+      padding: 20px;
+      margin-top: 20px;
+      border-radius: 10px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+    }
+    button {
+      width: 100%;
+      padding: 15px;
+      margin-top: 10px;
+      border: none;
+      border-radius: 8px;
+      font-size: 16px;
+      font-weight: bold;
+      color: white;
+      background: #ff9800;
+      cursor: pointer;
+    }
+    button:active {
+      background: #e68900;
+    }
+    input {
+      width: 100%;
+      padding: 12px;
+      margin-top: 10px;
+      border-radius: 8px;
+      border: 1px solid #ccc;
+      font-size: 16px;
+      box-sizing: border-box;
+    }
+    p {
+      margin-top: 10px;
+      font-size: 14px;
+      word-break: break-word;
+    }
+    #status {
+      font-weight: bold;
+      text-align: center;
+    }
+  </style>
 </head>
 <body>
-  <h2>HBIRD Claim Test (Helios Testnet)</h2>
-  <button id="connectBtn">🦊 Connect Wallet</button>
-  <p id="wallet">Wallet: Not connected</p>
-  
-  <input id="amount" type="number" placeholder="Amount HBIRD" value="100" />
-  <button id="claimBtn">Claim Reward</button>
-  
-  <p id="status"></p>
+  <h2>HBIRD Claim (Helios Testnet)</h2>
+  <div class="container">
+    <button id="connectBtn">🦊 Connect Wallet</button>
+    <p id="wallet">Wallet: Not connected</p>
+
+    <input id="amount" type="number" placeholder="Amount HBIRD" value="100" />
+    <button id="claimBtn">🎁 Claim Reward</button>
+    
+    <p id="status"></p>
+  </div>
 
 <script>
 const CONTRACT_ADDRESS = "0xb9ccd00c2016444f58e2492117b49da317f4899b";
 const VOUCHER_ENDPOINT = "https://birdfunbackend.vercel.app/api/sign";
 const HELIOS_RPC = "https://testnet1.helioschainlabs.org";
-const HELIOS_CHAIN_ID = 42000;
 
 const CONTRACT_ABI = [
   "function claimReward(uint256 amount, uint256 nonce, uint256 expiry, bytes signature) external",
@@ -30,24 +88,30 @@ let provider, signer, contract, playerAddress;
 
 async function connectWallet() {
   if (!window.ethereum) {
-    alert("Please install MetaMask");
+    alert("Please install MetaMask / Trust Wallet");
     return;
   }
 
-  // Tambahkan jaringan Helios Testnet kalau belum ada
   try {
+    // pastikan chain Helios Testnet
     await window.ethereum.request({
-      method: "wallet_addEthereumChain",
-      params: [{
-        chainId: "0xa410", // 42000 hex
-        chainName: "Helios Testnet",
-        nativeCurrency: { name: "tHLS", symbol: "tHLS", decimals: 18 },
-        rpcUrls: [HELIOS_RPC],
-        blockExplorerUrls: ["https://testnet.helios.explorer.io"]
-      }]
+      method: "wallet_switchEthereumChain",
+      params: [{ chainId: "0xa410" }] // 42000 in hex
     });
-  } catch (e) {
-    console.log("Helios Testnet sudah ada di wallet");
+  } catch (switchError) {
+    // kalau belum ada chain → tambahkan
+    if (switchError.code === 4902) {
+      await window.ethereum.request({
+        method: "wallet_addEthereumChain",
+        params: [{
+          chainId: "0xa410",
+          chainName: "Helios Testnet",
+          nativeCurrency: { name: "tHLS", symbol: "tHLS", decimals: 18 },
+          rpcUrls: [HELIOS_RPC],
+          blockExplorerUrls: []
+        }]
+      });
+    }
   }
 
   provider = new ethers.providers.Web3Provider(window.ethereum);
@@ -71,7 +135,7 @@ async function claimReward() {
     return;
   }
 
-  // Cari nonce yang belum dipakai
+  // cari nonce yang belum dipakai
   let nonce = 1;
   while (await contract.usedNonces(playerAddress, nonce)) {
     nonce++;
@@ -84,12 +148,12 @@ async function claimReward() {
   const voucher = await res.json();
 
   if (!voucher.success) {
-    document.getElementById("status").innerText = "Failed to get voucher!";
+    document.getElementById("status").innerText = "❌ Failed to get voucher!";
     return;
   }
 
   try {
-    document.getElementById("status").innerText = "Sending tx...";
+    document.getElementById("status").innerText = "⏳ Sending tx...";
     const tx = await contract.claimReward(
       voucher.amountWei,
       voucher.nonce,
